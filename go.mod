@@ -9,23 +9,24 @@ require (
 	cosmossdk.io/core v0.11.3
 	cosmossdk.io/depinject v1.2.1
 	cosmossdk.io/errors v1.0.2
-	cosmossdk.io/log v1.6.1
 	cosmossdk.io/math v1.5.3
 	cosmossdk.io/store v1.1.2
 	github.com/consensys/gnark-crypto v0.19.2
 	github.com/cosmos/cosmos-sdk v0.53.6
 	github.com/cosmos/gogoproto v1.7.2
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0
-	github.com/nixprotocol/poseidon2-go v0.1.0
+	github.com/nixprotocol/poseidon2-go v0.1.1
 	github.com/nixprotocol/poseidon2-merkle-go v0.1.0
 	github.com/nixprotocol/ultrahonk-go v0.1.0
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
+	google.golang.org/genproto/googleapis/api v0.0.0-20250707201910-8d1bb00bc6a7
 	google.golang.org/grpc v1.75.0
 )
 
 require (
 	cosmossdk.io/collections v1.3.1 // indirect
+	cosmossdk.io/log v1.6.1 // indirect
 	cosmossdk.io/schema v1.1.0 // indirect
 	cosmossdk.io/x/tx v0.14.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -154,7 +155,6 @@ require (
 	golang.org/x/term v0.34.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/genproto v0.0.0-20250603155806-513f23925822 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20250707201910-8d1bb00bc6a7 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250818200422-3122310a409c // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -164,11 +164,5 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace (
-	// Go 1.26 compatibility (remove when cosmossdk.io/log is updated)
-	github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
-
-	github.com/nixprotocol/poseidon2-go => ../poseidon2-go
-	github.com/nixprotocol/poseidon2-merkle-go => ../poseidon2-merkle-go
-	github.com/nixprotocol/ultrahonk-go => ../ultrahonk-go
-)
+// Go 1.26 compatibility (remove when cosmossdk.io/log is updated)
+replace github.com/bytedance/sonic => github.com/bytedance/sonic v1.15.0
