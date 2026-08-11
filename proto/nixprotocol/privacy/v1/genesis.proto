@@ -1,0 +1,42 @@
+syntax = "proto3";
+package nixprotocol.privacy.v1;
+
+option go_package = "github.com/nixprotocol/cosmos-nixpool/types";
+
+import "nixprotocol/privacy/v1/types.proto";
+
+// GenesisState defines the privacy module's genesis state.
+message GenesisState {
+  Params params = 1;
+  repeated TreeState trees = 2;
+  uint64 active_tree_id = 3;
+  uint64 tree_count = 4;
+  repeated bytes reg_commitments = 5;
+  repeated bytes reg_frontier = 6;
+  uint64 reg_next_index = 7;
+  bytes reg_merkle_root = 8;
+  repeated bytes nullifiers = 9;
+  repeated AuditorDataEntry auditor_data = 10;
+  repeated bytes commitments_used = 11;
+  repeated VerificationKeyEntry verification_keys = 12;
+}
+
+// TreeState captures the full state of a single Merkle tree.
+message TreeState {
+  uint64 tree_id = 1;
+  repeated bytes commitments = 2;
+  repeated bytes frontier = 3;
+  uint64 next_index = 4;
+  bytes merkle_root = 5;
+  repeated bytes root_history = 6;
+}
+
+message AuditorDataEntry {
+  bytes tx_hash = 1;
+  bytes data = 2;
+}
+
+message VerificationKeyEntry {
+  string circuit_name = 1;
+  bytes vk_data = 2;
+}

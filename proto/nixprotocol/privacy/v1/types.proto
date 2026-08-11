@@ -1,0 +1,13 @@
+syntax = "proto3";
+package nixprotocol.privacy.v1;
+
+option go_package = "github.com/nixprotocol/cosmos-nixpool/types";
+
+// Params defines the parameters for the nixpool privacy module.
+message Params {
+  uint32 tree_depth = 1;
+  uint32 reg_tree_depth = 2;
+  bytes auditor_pub_key = 3;
+  repeated string supported_denoms = 4;
+  bytes chain_binding = 5;         // Poseidon2 hash of chainId for replay protection
+}

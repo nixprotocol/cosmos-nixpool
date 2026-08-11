@@ -1,0 +1,107 @@
+syntax = "proto3";
+package nixprotocol.privacy.v1;
+
+option go_package = "github.com/nixprotocol/cosmos-nixpool/types";
+
+import "cosmos/msg/v1/msg.proto";
+import "nixprotocol/privacy/v1/types.proto";
+
+// Msg defines the privacy module Msg service.
+service Msg {
+  option (cosmos.msg.v1.service) = true;
+
+  rpc Register(MsgRegister) returns (MsgRegisterResponse);
+  rpc Deposit(MsgDeposit) returns (MsgDepositResponse);
+  rpc Transact(MsgTransact) returns (MsgTransactResponse);
+  rpc UpdateParams(MsgUpdateParams) returns (MsgUpdateParamsResponse);
+  rpc SetVerificationKey(MsgSetVerificationKey) returns (MsgSetVerificationKeyResponse);
+}
+
+// MsgRegister registers a new identity in the privacy pool.
+message MsgRegister {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1;
+  bytes identity_commitment = 2;
+  bytes proof = 3;
+  bytes public_inputs = 4;
+  bytes auditor_encrypted_data = 5;
+}
+
+message MsgRegisterResponse {
+  uint64 leaf_index = 1;
+  bytes merkle_root = 2;
+}
+
+// MsgDeposit shields tokens from x/bank into the private pool.
+message MsgDeposit {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1;
+  string denom = 2;
+  string amount = 3;
+  bytes note_commitment = 4;
+  bytes proof = 5;
+  bytes public_inputs = 6;
+  bytes auditor_encrypted_data = 7;
+}
+
+message MsgDepositResponse {
+  uint64 leaf_index = 1;
+  bytes merkle_root = 2;
+}
+
+// OutputNote contains a new note hash and its associated encrypted auditor data.
+message OutputNote {
+  bytes note_hash = 1;
+  bytes ephemeral_x = 2;
+  bytes ephemeral_y = 3;
+  bytes enc_amount = 4;
+  bytes enc_salt = 5;
+  bytes auditor_enc = 6;
+  bytes auditor_auth_key_x = 7;
+  bytes auditor_auth_key_y = 8;
+  bytes auditor_enc_recipient = 9;
+}
+
+// MsgTransact performs a 2-in/2-out private transfer, optionally with withdrawal.
+message MsgTransact {
+  option (cosmos.msg.v1.signer) = "sender";
+
+  string sender = 1;
+  repeated bytes nullifiers = 2;          // exactly 2 (32 bytes each, zero-padded if unused)
+  repeated bytes merkle_roots = 3;        // exactly 2
+  repeated OutputNote outputs = 4;        // exactly 2
+  string withdraw_amount = 5;
+  string withdraw_address = 6;
+  string denom = 7;
+  bytes registration_root = 8;
+  string relayer_fee = 9;
+  bytes proof = 10;
+}
+
+message MsgTransactResponse {
+  repeated uint64 leaf_indices = 1;
+  bytes merkle_root = 2;
+}
+
+// MsgUpdateParams updates the module parameters. Only callable by governance.
+message MsgUpdateParams {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  string authority = 1;
+  Params params = 2;
+}
+
+message MsgUpdateParamsResponse {}
+
+// MsgSetVerificationKey sets or updates a circuit verification key. Only callable by governance.
+message MsgSetVerificationKey {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  string authority = 1;
+  string circuit_name = 2;
+  bytes vk_data = 3;
+}
+
+message MsgSetVerificationKeyResponse {}

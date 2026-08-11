@@ -1,0 +1,59 @@
+syntax = "proto3";
+package nixprotocol.privacy.v1;
+
+option go_package = "github.com/nixprotocol/cosmos-nixpool/types";
+
+import "google/api/annotations.proto";
+import "nixprotocol/privacy/v1/types.proto";
+
+// Query defines the gRPC querier service for the privacy module.
+service Query {
+  rpc Root(QueryRootRequest) returns (QueryRootResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/root";
+  }
+  rpc NullifierStatus(QueryNullifierStatusRequest) returns (QueryNullifierStatusResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/nullifier/{nullifier}";
+  }
+  rpc TreeInfo(QueryTreeInfoRequest) returns (QueryTreeInfoResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/tree_info";
+  }
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/params";
+  }
+  rpc RegistrationRoot(QueryRegistrationRootRequest) returns (QueryRegistrationRootResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/registration_root";
+  }
+  rpc AuditorKey(QueryAuditorKeyRequest) returns (QueryAuditorKeyResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/auditor_key";
+  }
+  rpc SupportedDenoms(QuerySupportedDenomsRequest) returns (QuerySupportedDenomsResponse) {
+    option (google.api.http).get = "/nixprotocol/privacy/v1/supported_denoms";
+  }
+}
+
+message QueryRootRequest {}
+message QueryRootResponse { bytes root = 1; }
+
+message QueryNullifierStatusRequest { bytes nullifier = 1; }
+message QueryNullifierStatusResponse { bool spent = 1; }
+
+message QueryTreeInfoRequest {}
+message QueryTreeInfoResponse {
+  uint64 next_index = 1;
+  bytes root = 2;
+  uint32 depth = 3;
+  uint64 active_tree_id = 4;
+  uint64 tree_count = 5;
+}
+
+message QueryParamsRequest {}
+message QueryParamsResponse { Params params = 1; }
+
+message QueryRegistrationRootRequest {}
+message QueryRegistrationRootResponse { bytes root = 1; }
+
+message QueryAuditorKeyRequest {}
+message QueryAuditorKeyResponse { bytes auditor_pub_key = 1; }
+
+message QuerySupportedDenomsRequest {}
+message QuerySupportedDenomsResponse { repeated string denoms = 1; }

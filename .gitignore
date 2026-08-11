@@ -1,0 +1,8 @@
+*.out
+*.test
+*.prof
+vendor/
+
+# Protoc artifact: generated .pb.go files land at the full module path instead
+# of the local types/ directory. Duplicates of types/*.pb.go.
+github.com/
