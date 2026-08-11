@@ -12,8 +12,13 @@ balances as ElGamal ciphertexts rather than a UTXO set — see
 ## Quick Start
 
 ```bash
-go get github.com/nixprotocol/cosmos-nixpool@v0.1.1
+go get github.com/nixprotocol/cosmos-nixpool@v0.1.2
 ```
+
+> **Use v0.1.2 or later on Go 1.26.** Earlier versions pinned the required
+> `bytedance/sonic` fix with a `replace` directive, which Go honours only in the
+> main module and ignores for imported packages — so consumers resolved the
+> broken version and failed to compile.
 
 ## Features
 
