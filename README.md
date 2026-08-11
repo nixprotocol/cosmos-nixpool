@@ -1,12 +1,18 @@
-# nix-cosmos-sdk
+# cosmos-nixpool
 
-Reusable privacy module for Cosmos SDK chains. Provides a working privacy pool
-with ZK proof verification, shielded transfers, and mandatory auditor compliance.
+A Cosmos SDK **privacy pool**: a shielded UTXO set of Poseidon2 note
+commitments with nullifier-based spends, verifying Noir/UltraHonk proofs
+natively in Go. Drops into any Cosmos SDK chain, with mandatory auditor
+compliance data on every transaction.
+
+This is the Cosmos implementation of nixpool. For the *account-model* approach —
+balances as ElGamal ciphertexts rather than a UTXO set — see
+[`confidential-module`](https://github.com/nixprotocol/confidential-module).
 
 ## Quick Start
 
 ```bash
-go get github.com/nixprotocol/cosmos-nixpool
+go get github.com/nixprotocol/cosmos-nixpool@v0.1.1
 ```
 
 ## Features
@@ -32,14 +38,15 @@ import (
 
 // In NewApp:
 app.NixpoolKeeper = nixkeeper.NewKeeper(
-    appCodec,
     runtime.NewKVStoreService(keys[nixtypes.StoreKey]),
+    appCodec,
+    app.AccountKeeper.AddressCodec(),
+    authtypes.NewModuleAddress(govtypes.ModuleName), // authority, as []byte
     app.BankKeeper,
-    authtypes.NewModuleAddress(govtypes.ModuleName).String(),
 )
 
 app.ModuleManager.Modules[nixtypes.ModuleName] = nixmodule.NewAppModule(
-    appCodec, app.NixpoolKeeper,
+    appCodec, app.NixpoolKeeper, app.BankKeeper,
 )
 ```
 
