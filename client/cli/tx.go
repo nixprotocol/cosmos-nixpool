@@ -77,12 +77,12 @@ func CmdDeposit() *cobra.Command {
 			}
 
 			msg := &types.MsgDeposit{
-				Sender:              clientCtx.GetFromAddress().String(),
-				Denom:               denom,
-				Amount:              amount,
-				NoteCommitment:      noteCommitment,
-				Proof:               proof,
-				PublicInputs:        publicInputs,
+				Sender:               clientCtx.GetFromAddress().String(),
+				Denom:                denom,
+				Amount:               amount,
+				NoteCommitment:       noteCommitment,
+				Proof:                proof,
+				PublicInputs:         publicInputs,
 				AuditorEncryptedData: auditorData,
 			}
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
@@ -229,10 +229,10 @@ func CmdRegister() *cobra.Command {
 			}
 
 			msg := &types.MsgRegister{
-				Sender:              clientCtx.GetFromAddress().String(),
-				IdentityCommitment:  identityCommitment,
-				Proof:               proof,
-				PublicInputs:        publicInputs,
+				Sender:               clientCtx.GetFromAddress().String(),
+				IdentityCommitment:   identityCommitment,
+				Proof:                proof,
+				PublicInputs:         publicInputs,
 				AuditorEncryptedData: auditorData,
 			}
 			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
@@ -260,14 +260,14 @@ func readAuditorDataFlag(cmd *cobra.Command) ([]byte, error) {
 // parseOutputNotesJSON parses a JSON array of OutputNote hex objects.
 func parseOutputNotesJSON(data []byte) ([]*types.OutputNote, error) {
 	type outputNoteHex struct {
-		NoteHash           string `json:"note_hash"`
-		EphemeralX         string `json:"ephemeral_x"`
-		EphemeralY         string `json:"ephemeral_y"`
-		EncAmount          string `json:"enc_amount"`
-		EncSalt            string `json:"enc_salt"`
-		AuditorEnc         string `json:"auditor_enc"`
-		AuditorAuthKeyX    string `json:"auditor_auth_key_x"`
-		AuditorAuthKeyY    string `json:"auditor_auth_key_y"`
+		NoteHash            string `json:"note_hash"`
+		EphemeralX          string `json:"ephemeral_x"`
+		EphemeralY          string `json:"ephemeral_y"`
+		EncAmount           string `json:"enc_amount"`
+		EncSalt             string `json:"enc_salt"`
+		AuditorEnc          string `json:"auditor_enc"`
+		AuditorAuthKeyX     string `json:"auditor_auth_key_x"`
+		AuditorAuthKeyY     string `json:"auditor_auth_key_y"`
 		AuditorEncRecipient string `json:"auditor_enc_recipient"`
 	}
 

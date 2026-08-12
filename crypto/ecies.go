@@ -17,8 +17,8 @@ import (
 
 // ECIESCiphertext contains the encrypted value and ephemeral key.
 type ECIESCiphertext struct {
-	AuthKeyX fr.Element
-	AuthKeyY fr.Element
+	AuthKeyX  fr.Element
+	AuthKeyY  fr.Element
 	Encrypted fr.Element
 }
 

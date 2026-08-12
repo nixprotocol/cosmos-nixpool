@@ -2,8 +2,8 @@
 
 A Cosmos SDK **privacy pool**: a shielded UTXO set of Poseidon2 note
 commitments with nullifier-based spends, verifying Noir/UltraHonk proofs
-natively in Go. Drops into any Cosmos SDK chain, with mandatory auditor
-compliance data on every transaction.
+natively in Go. Drops into any Cosmos SDK chain, with optional auditor
+compliance data enforced once an auditor key is configured.
 
 This is the Cosmos implementation of nixpool. For the *account-model* approach —
 balances as ElGamal ciphertexts rather than a UTXO set — see
@@ -27,7 +27,8 @@ go get github.com/nixprotocol/cosmos-nixpool@v0.1.2
 - **Multi-tree forest**: Auto-expanding note trees (2^20 leaves per tree)
 - **Withdrawal via Transact**: Set `withdraw_amount > 0` (no separate claim message)
 - **UltraHonk verification**: Noir-compatible proof system over BN254
-- **Auditor compliance**: Mandatory ECIES-encrypted data for all transactions
+- **Auditor compliance**: ECIES-encrypted data, required on every transaction
+  once `auditor_pub_key` is set (unset by default, in which case none is required)
 - **Relayer support**: Built-in relayer fee mechanism
 
 ## Integration
@@ -91,5 +92,10 @@ app.ModuleManager.Modules[nixtypes.ModuleName] = nixmodule.NewAppModule(
 
 - No ZK-level denom binding (enforced at handler level for v1)
 - No chainId binding in circuits (enforced at handler level via ChainBinding param)
-- Transact/registration VKs must be set via governance (only deposit VK is hardcoded)
+- No verification key is embedded in the binary. All three circuits load their
+  VK from state, so every one must be supplied via genesis or a
+  `MsgSetVerificationKey` governance proposal before that message type works.
+- `chain_binding` must be set before the pool is usable. Register and Transact
+  fail closed without it, and Deposit now does too — otherwise a pool could
+  escrow coins it had no way to release.
 - Client-side proof generation requires JS/WASM SDK (not included)

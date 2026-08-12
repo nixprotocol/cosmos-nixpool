@@ -7,9 +7,9 @@ import (
 
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 
-	merkle "github.com/nixprotocol/poseidon2-merkle-go"
-	poseidon2 "github.com/nixprotocol/poseidon2-go"
 	"github.com/nixprotocol/cosmos-nixpool/types"
+	poseidon2 "github.com/nixprotocol/poseidon2-go"
+	merkle "github.com/nixprotocol/poseidon2-merkle-go"
 )
 
 // ---------- Multi-tree note forest ----------

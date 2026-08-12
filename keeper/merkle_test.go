@@ -6,8 +6,8 @@ import (
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 	"github.com/stretchr/testify/require"
 
-	merkle "github.com/nixprotocol/poseidon2-merkle-go"
 	poseidon2 "github.com/nixprotocol/poseidon2-go"
+	merkle "github.com/nixprotocol/poseidon2-merkle-go"
 )
 
 // TestZeroHashConsistency verifies that our zeroRootBytes matches merkle.ZeroHash.

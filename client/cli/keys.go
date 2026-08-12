@@ -34,11 +34,11 @@ func CmdGenNixKey() *cobra.Command {
 			jsonFlag, _ := cmd.Flags().GetBool("json")
 			if jsonFlag {
 				output := map[string]string{
-					"private_key": hex.EncodeToString(privKey.ScalarBytes()),
+					"private_key":  hex.EncodeToString(privKey.ScalarBytes()),
 					"public_key_x": fmt.Sprintf("%064x", pubKey.Key[:32]),
 					"public_key_y": fmt.Sprintf("%064x", pubKey.Key[32:]),
-					"commitment":  fmt.Sprintf("%064x", commitmentBytes),
-					"nix_address": nixAddr,
+					"commitment":   fmt.Sprintf("%064x", commitmentBytes),
+					"nix_address":  nixAddr,
 				}
 				bz, err := json.MarshalIndent(output, "", "  ")
 				if err != nil {
@@ -94,8 +94,8 @@ func CmdNixAddress() *cobra.Command {
 				output := map[string]string{
 					"public_key_x": fmt.Sprintf("%064x", pubKey.Key[:32]),
 					"public_key_y": fmt.Sprintf("%064x", pubKey.Key[32:]),
-					"commitment":  fmt.Sprintf("%064x", commitmentBytes),
-					"nix_address": nixAddr,
+					"commitment":   fmt.Sprintf("%064x", commitmentBytes),
+					"nix_address":  nixAddr,
 				}
 				bz, err := json.MarshalIndent(output, "", "  ")
 				if err != nil {

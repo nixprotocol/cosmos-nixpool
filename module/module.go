@@ -43,7 +43,7 @@ func NewAppModule(cdc codec.Codec, keeper keeper.Keeper, bankKeeper types.BankKe
 	}
 }
 
-func (AppModule) IsAppModule()       {}
+func (AppModule) IsAppModule()        {}
 func (AppModule) IsOnePerModuleType() {}
 
 func (AppModule) Name() string { return types.ModuleName }
