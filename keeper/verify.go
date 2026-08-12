@@ -8,11 +8,34 @@ import (
 
 	"cosmossdk.io/math"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"github.com/nixprotocol/cosmos-nixpool/types"
 	poseidon2 "github.com/nixprotocol/poseidon2-go"
 	ultrahonk "github.com/nixprotocol/ultrahonk-go"
 )
+
+// GasUltraHonkVerify prices one UltraHonk proof verification.
+//
+// Cosmos meters store access and transaction bytes, never CPU. Proof
+// verification is therefore invisible to the gas meter unless charged
+// explicitly, and until this constant existed it was: a transaction carrying a
+// deliberately invalid proof paid only for its ~14.6KB of bytes while forcing
+// every validator through a full verification that then failed. Register is the
+// cheapest such vector, needing no funds and no note ownership.
+//
+// Measured with ultrahonk-go's BenchmarkVerify: ~1,900μs/op (1.88-2.00ms over
+// three runs, Apple M-series). The cost is essentially fixed per proof rather
+// than per circuit -- verification always runs a 28-round sumcheck and an MSM
+// over 70 commitments -- so one constant covers deposit, registration, and
+// transact alike.
+//
+// Priced at ~200 gas/μs to match the sibling confidential-module, whose Schnorr
+// verifications sit in a 132-325 gas/μs band (see its keeper/verify.go). 1,900μs
+// x 200 = 380,000, rounded up. Underpricing is the direction that hurts, so this
+// deliberately sits at the top of that band: an UltraHonk verify is roughly 5x
+// the wall-clock of that module's most expensive Schnorr proof.
+const GasUltraHonkVerify = 400_000
 
 // Circuit public input counts
 const (
@@ -118,6 +141,10 @@ func (k Keeper) VerifyProof(ctx context.Context, circuitName string, proof []byt
 	if err != nil {
 		return err
 	}
+
+	// Charge before verifying, not after: an invalid proof costs a validator the
+	// same CPU as a valid one, and the caller must pay for it either way.
+	sdk.UnwrapSDKContext(ctx).GasMeter().ConsumeGas(GasUltraHonkVerify, "ultrahonk proof verification")
 
 	verified, err := ultrahonk.Verify(vk, proof, publicInputs)
 	if err != nil {

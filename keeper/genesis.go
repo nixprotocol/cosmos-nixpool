@@ -3,6 +3,7 @@ package keeper
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 
 	storetypes "cosmossdk.io/store/types"
 
@@ -129,9 +130,20 @@ func (k Keeper) InitGenesis(ctx context.Context, gs *types.GenesisState) error {
 		}
 	}
 
-	// Verification keys
+	// Verification keys.
+	//
+	// Normalize exactly as the MsgSetVerificationKey handler does, and fail the
+	// launch rather than storing something unusable. Barretenberg emits VKs with
+	// an 8-byte header; storing that raw produces a chain that starts cleanly and
+	// then rejects every proof for the circuit with a length error, because the
+	// mismatch only surfaces on the read path at verification time. Better to
+	// refuse to start than to come up with a silently non-functional pool.
 	for _, vke := range gs.VerificationKeys {
-		if err := store.Set(types.VKKey(vke.CircuitName), vke.VkData); err != nil {
+		canonical, err := NormalizeVKData(vke.VkData)
+		if err != nil {
+			return fmt.Errorf("genesis verification key for circuit %q is invalid: %w", vke.CircuitName, err)
+		}
+		if err := store.Set(types.VKKey(vke.CircuitName), canonical); err != nil {
 			return err
 		}
 	}
