@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 
+	storetypes "cosmossdk.io/store/types"
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr"
 
 	"github.com/nixprotocol/cosmos-nixpool/types"
@@ -548,15 +549,42 @@ func (k Keeper) setRootHistoryIndexed(ctx context.Context, treeId, slot uint64, 
 // setters -- so this is only for in-place upgrades.
 //
 // The walk is bounded by trees x (1 + MaxRootHistory), the same work the old
-// lookup did on a single miss. It is safe to run more than once: it clears each
-// root's entry before recounting, so it converges on the true count rather than
-// accumulating.
+// lookup did on a single miss.
+//
+// It discards the whole existing index before recounting, rather than
+// overwriting the entries it happens to find. That difference matters: an entry
+// for a root held in no slot would otherwise survive a rebuild, and a lingering
+// entry is exactly the failure this design guards against -- it keeps a root
+// valid after its history slot was reused, which is unbounded lookback by
+// another route. Only a full clear makes the rebuilt index a function of the
+// authoritative slots alone, which is what makes it safe to run at any time and
+// as often as needed.
 func (k Keeper) RebuildRootIndex(ctx context.Context) error {
 	count, err := k.GetTreeCount(ctx)
 	if err != nil {
 		return err
 	}
 	store := k.storeService.OpenKVStore(ctx)
+
+	// Drop every existing entry first. Collected before deleting because
+	// mutating the store under an open iterator is not safe.
+	prefix := types.RootIndexPrefix()
+	iter, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return err
+	}
+	var stale [][]byte
+	for ; iter.Valid(); iter.Next() {
+		stale = append(stale, append([]byte(nil), iter.Key()...))
+	}
+	if err := iter.Close(); err != nil {
+		return err
+	}
+	for _, key := range stale {
+		if err := store.Delete(key); err != nil {
+			return err
+		}
+	}
 
 	// Collect first, then write, so a root appearing in several slots is counted
 	// once per slot rather than being reset midway through its own tally.

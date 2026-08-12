@@ -135,6 +135,13 @@ func RootIndexKey(root []byte) []byte {
 	return appendBytes(rootIndexPrefix, CanonicalFieldBytes(root))
 }
 
+// RootIndexPrefix returns the prefix covering every root index entry, so the
+// index can be cleared wholesale when rebuilding it from the authoritative
+// root slots.
+func RootIndexPrefix() []byte {
+	return copyBytes(rootIndexPrefix)
+}
+
 // TreeNextIndexKey returns the store key for the next leaf index of a specific tree.
 func TreeNextIndexKey(treeId uint64) []byte {
 	return appendUint64(treeNextIndexPrefix, treeId)

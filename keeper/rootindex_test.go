@@ -199,3 +199,95 @@ func TestRebuildRootIndexReconstructsState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before, after, "RebuildRootIndex must be idempotent")
 }
+
+// TestRebuildRootIndexRemovesOrphans covers the case that makes rebuilding
+// worth having at all: an index entry for a root held in no slot.
+//
+// Recounting only the roots found in slots is not enough. An orphaned entry
+// would survive, and an orphan keeps a root valid after its history slot was
+// reused -- unbounded lookback reached by a different route than a missing
+// decrement. A rebuild is only a repair if the result depends solely on the
+// authoritative slots, which means discarding the old index rather than
+// overwriting parts of it.
+func TestRebuildRootIndexRemovesOrphans(t *testing.T) {
+	k, _, ctx := setupKeeper(t)
+
+	for i := uint64(0); i < 5; i++ {
+		_, _, _, err := k.InsertNote(ctx, commitmentAt(i))
+		require.NoError(t, err)
+	}
+
+	// A root that is in no tree slot, as a partial write or interrupted upgrade
+	// could leave behind.
+	orphan := commitmentAt(4242)
+	require.NoError(t, k.rootIndexIncr(ctx, orphan))
+
+	valid, err := k.IsValidRootAnyTree(ctx, orphan)
+	require.NoError(t, err)
+	require.True(t, valid, "precondition: the orphan is currently accepted")
+	require.False(t, scanIsValidRootAnyTree(t, k, ctx, orphan),
+		"precondition: no tree slot actually holds it")
+
+	require.NoError(t, k.RebuildRootIndex(ctx))
+
+	valid, err = k.IsValidRootAnyTree(ctx, orphan)
+	require.NoError(t, err)
+	require.False(t, valid,
+		"rebuild left an index entry for a root no slot holds; such an entry keeps "+
+			"a root valid forever regardless of the history window")
+
+	// The legitimate roots must survive the clear.
+	for i := uint64(0); i < 5; i++ {
+		root, err := k.GetTreeRoot(ctx, 0)
+		require.NoError(t, err)
+		ok, err := k.IsValidRootAnyTree(ctx, root)
+		require.NoError(t, err)
+		require.True(t, ok, "rebuild must not drop roots that are genuinely held")
+	}
+}
+
+// TestGenesisRoundTripPreservesRootValidity exercises export -> import on a
+// fresh store, which is the migration path for this change and had no coverage.
+//
+// The index is derived state and is deliberately not exported. That is only
+// correct if InitGenesis rebuilds it while writing the root slots; if it wrote
+// them raw, an imported chain would come up rejecting every root it knows and
+// Transact would fail on a chain that looked healthy.
+func TestGenesisRoundTripPreservesRootValidity(t *testing.T) {
+	src, _, srcCtx := setupKeeper(t)
+
+	var roots [][]byte
+	for i := uint64(0); i < 8; i++ {
+		r, _, _, err := src.InsertNote(srcCtx, commitmentAt(i))
+		require.NoError(t, err)
+		roots = append(roots, append([]byte(nil), r...))
+	}
+
+	exported, err := src.ExportGenesis(srcCtx)
+	require.NoError(t, err)
+
+	// Import into a completely separate store.
+	dst, _, dstCtx := setupKeeper(t)
+	require.NoError(t, dst.InitGenesis(dstCtx, exported))
+
+	for i, r := range roots {
+		viaIndex, err := dst.IsValidRootAnyTree(dstCtx, r)
+		require.NoError(t, err)
+		require.Equal(t, scanIsValidRootAnyTree(t, dst, dstCtx, r), viaIndex,
+			"imported chain: index and slots disagree on root %d", i)
+	}
+
+	// The most recent root must certainly still be spendable-against.
+	last := roots[len(roots)-1]
+	ok, err := dst.IsValidRootAnyTree(dstCtx, last)
+	require.NoError(t, err)
+	require.True(t, ok,
+		"imported chain rejects its own current root: InitGenesis wrote root slots "+
+			"without populating the index that validation reads")
+
+	// And a root that never existed is still rejected after import.
+	bogus := commitmentAt(7777)
+	ok, err = dst.IsValidRootAnyTree(dstCtx, bogus)
+	require.NoError(t, err)
+	require.False(t, ok, "import must not make unknown roots valid")
+}
