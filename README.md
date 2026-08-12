@@ -12,7 +12,7 @@ balances as ElGamal ciphertexts rather than a UTXO set — see
 ## Quick Start
 
 ```bash
-go get github.com/nixprotocol/cosmos-nixpool@v0.1.2
+go get github.com/nixprotocol/cosmos-nixpool@v0.1.4
 ```
 
 > **Use v0.1.2 or later on Go 1.26.** Earlier versions pinned the required
