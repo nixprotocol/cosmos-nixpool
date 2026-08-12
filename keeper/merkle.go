@@ -462,6 +462,29 @@ func (k Keeper) IsKnownRoot(ctx context.Context, treeId uint64, root []byte) (bo
 }
 
 // IsValidRootAnyTree checks if the given root is known across any tree in the forest.
+//
+// This is O(trees x MaxRootHistory) store reads when the root is not found, and
+// Transact calls it once per non-zero nullifier. The forest only grows -- spent
+// notes remain as nullified leaves -- so the cost per Transact rises with total
+// pool history and never falls. Measured at roughly 1,100 gas per root read,
+// the lookups alone reach ~28% of a 40M-gas block at ~50 trees, and at ~180
+// trees a single Transact exceeds the block limit, which would make the message
+// type unexecutable chain-wide. An attacker can drive that growth while paying
+// only fees: deposit once, then self-directed 2-in/2-out transacts, each adding
+// leaves while the principal stays pooled.
+//
+// The fix is a root -> treeId index, making this O(1). Before implementing it,
+// note that the easy half is the lookup and the hard half is eviction:
+//
+//	MaxRootHistory is not a cache bound, it is a soundness bound. It is what
+//	makes old roots EXPIRE, so a spend can only prove against a recent tree
+//	state. An index that never deletes would make every root ever observed
+//	valid forever, silently converting bounded lookback into unbounded and
+//	accepting arbitrarily stale roots. The index entry must be deleted when
+//	the ring buffer overwrites its slot.
+//
+// That is why this has not simply been optimised in place: the obvious version
+// of the optimisation is a security regression.
 func (k Keeper) IsValidRootAnyTree(ctx context.Context, root []byte) (bool, error) {
 	count, err := k.GetTreeCount(ctx)
 	if err != nil {
