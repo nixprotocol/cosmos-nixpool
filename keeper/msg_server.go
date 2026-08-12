@@ -134,6 +134,24 @@ func (k msgServer) Deposit(goCtx context.Context, msg *types.MsgDeposit) (*types
 		return nil, err
 	}
 
+	// Refuse to take custody of funds that could not be withdrawn.
+	//
+	// The deposit circuit has no chain_id public input, so unlike Register and
+	// Transact there is nothing here to bind against. That asymmetry is a trap:
+	// Transact is the ONLY withdrawal path and it fails closed on an unset
+	// ChainBinding, so a pool holding a deposit VK but no chain_binding accepts
+	// escrowed coins and then rejects every attempt to get them back. The funds
+	// sit in the module account until governance sets the param.
+	//
+	// Failing closed on the way in too makes that state unreachable. The cost of
+	// being wrong here is a rejected deposit; the cost of the other direction is
+	// stranded user funds.
+	if len(params.ChainBinding) == 0 {
+		return nil, types.ErrInvalidPublicInputs.Wrap(
+			"chain binding not configured; set params.chain_binding before accepting deposits " +
+				"(withdrawal via Transact requires it, so deposits would be unrecoverable)")
+	}
+
 	// Bind the proof to the message fields and the configured auditor key
 	// before spending gas on verification.
 	if err := VerifyDepositPublicInputs(publicInputs, msg.NoteCommitment, amt, msg.Denom, params); err != nil {
