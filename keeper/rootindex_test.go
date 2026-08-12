@@ -1,0 +1,201 @@
+package keeper
+
+import (
+	"context"
+	"encoding/binary"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/nixprotocol/cosmos-nixpool/types"
+)
+
+// commitmentAt produces a distinct 32-byte note commitment per index.
+func commitmentAt(i uint64) []byte {
+	c := make([]byte, 32)
+	binary.BigEndian.PutUint64(c[24:], i+1) // +1: never the all-zero leaf
+	return c
+}
+
+// scanIsValidRootAnyTree is the pre-index implementation, kept as an oracle.
+// It reads the authoritative root slots directly, so agreeing with it is what
+// "the index is correct" means.
+func scanIsValidRootAnyTree(t *testing.T, k Keeper, ctx context.Context, root []byte) bool {
+	t.Helper()
+	count, err := k.GetTreeCount(ctx)
+	require.NoError(t, err)
+	if count == 0 {
+		return bytesEqualZeroRoot(root)
+	}
+	for treeId := uint64(0); treeId < count; treeId++ {
+		known, err := k.IsKnownRoot(ctx, treeId, root)
+		require.NoError(t, err)
+		if known {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesEqualZeroRoot(root []byte) bool {
+	z := zeroRootBytes(types.DefaultTreeDepth)
+	if len(z) != len(root) {
+		return false
+	}
+	for i := range z {
+		if z[i] != root[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestRootIndexAgreesWithScan checks the O(1) index against the O(n) scan it
+// replaced, over every root the tree passes through plus roots that never
+// existed. Equivalence is the property that matters: the index is only a
+// performance change if it answers identically.
+func TestRootIndexAgreesWithScan(t *testing.T) {
+	k, _, ctx := setupKeeper(t)
+
+	var seen [][]byte
+	for i := uint64(0); i < 25; i++ {
+		root, _, _, err := k.InsertNote(ctx, commitmentAt(i))
+		require.NoError(t, err)
+		seen = append(seen, append([]byte(nil), root...))
+
+		// Every root observed so far, checked both ways.
+		for j, r := range seen {
+			viaIndex, err := k.IsValidRootAnyTree(ctx, r)
+			require.NoError(t, err)
+			require.Equal(t, scanIsValidRootAnyTree(t, k, ctx, r), viaIndex,
+				"index and scan disagree on root %d after %d inserts", j, i+1)
+		}
+	}
+
+	// Roots that were never a tree state must be rejected by both.
+	for i := uint64(0); i < 5; i++ {
+		bogus := commitmentAt(9000 + i)
+		viaIndex, err := k.IsValidRootAnyTree(ctx, bogus)
+		require.NoError(t, err)
+		require.Equal(t, scanIsValidRootAnyTree(t, k, ctx, bogus), viaIndex)
+		require.False(t, viaIndex, "a root that never existed must not validate")
+	}
+}
+
+// TestRootExpiresWhenRingBufferWraps is the soundness test, and the reason this
+// change needed care.
+//
+// MaxRootHistory is not a cache size. It is what makes an old root EXPIRE, so a
+// spend can only prove against a recent tree state. An index that recorded roots
+// without evicting them would make every root ever observed valid forever --
+// turning bounded lookback into unbounded while every other test still passed.
+//
+// So: a root must remain valid for MaxRootHistory inserts and must stop being
+// valid once its ring buffer slot is overwritten.
+func TestRootExpiresWhenRingBufferWraps(t *testing.T) {
+	k, _, ctx := setupKeeper(t)
+
+	firstRoot, _, _, err := k.InsertNote(ctx, commitmentAt(0))
+	require.NoError(t, err)
+
+	valid, err := k.IsValidRootAnyTree(ctx, firstRoot)
+	require.NoError(t, err)
+	require.True(t, valid, "a freshly created root must be valid")
+
+	// Fill the rest of the ring. The first root occupied slot 0, so it survives
+	// until insert number MaxRootHistory reuses that slot.
+	for i := uint64(1); i < types.MaxRootHistory; i++ {
+		_, _, _, err := k.InsertNote(ctx, commitmentAt(i))
+		require.NoError(t, err)
+	}
+
+	valid, err = k.IsValidRootAnyTree(ctx, firstRoot)
+	require.NoError(t, err)
+	require.True(t, valid,
+		"root must still be valid at the edge of the window (%d inserts)", types.MaxRootHistory-1)
+
+	// One more insert wraps onto slot 0 and evicts the first root.
+	_, _, _, err = k.InsertNote(ctx, commitmentAt(types.MaxRootHistory))
+	require.NoError(t, err)
+
+	valid, err = k.IsValidRootAnyTree(ctx, firstRoot)
+	require.NoError(t, err)
+	require.False(t, valid,
+		"root outlived its history slot: the index is not evicting, which silently "+
+			"converts bounded root lookback into unbounded and lets a spend prove "+
+			"against arbitrarily stale tree state")
+
+	// And the scan agrees it is gone -- the index did not merely lose track of a
+	// root that is still reachable in the authoritative slots.
+	require.False(t, scanIsValidRootAnyTree(t, k, ctx, firstRoot),
+		"scan and index must agree that the root expired")
+}
+
+// TestRootIndexRefcountsSharedRoots covers why the index counts references
+// instead of storing a set. One insert writes the same root to both the tree's
+// current-root slot and a history slot, so a single decrement must not drop a
+// root that is still live elsewhere.
+func TestRootIndexRefcountsSharedRoots(t *testing.T) {
+	k, _, ctx := setupKeeper(t)
+
+	root, _, _, err := k.InsertNote(ctx, commitmentAt(0))
+	require.NoError(t, err)
+
+	n, err := k.rootRefCount(ctx, root)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), n,
+		"a new root occupies the current-root slot and a history slot")
+
+	// The next insert displaces it as current root but leaves it in history.
+	_, _, _, err = k.InsertNote(ctx, commitmentAt(1))
+	require.NoError(t, err)
+
+	n, err = k.rootRefCount(ctx, root)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), n, "still held by its history slot")
+
+	valid, err := k.IsValidRootAnyTree(ctx, root)
+	require.NoError(t, err)
+	require.True(t, valid, "a root still in history must remain spendable-against")
+}
+
+// TestRebuildRootIndexReconstructsState covers the in-place upgrade path: a
+// chain whose state predates the index must be able to rebuild it, or
+// IsValidRootAnyTree would reject every root the chain knows and halt Transact.
+func TestRebuildRootIndexReconstructsState(t *testing.T) {
+	k, _, ctx := setupKeeper(t)
+
+	var roots [][]byte
+	for i := uint64(0); i < 10; i++ {
+		r, _, _, err := k.InsertNote(ctx, commitmentAt(i))
+		require.NoError(t, err)
+		roots = append(roots, append([]byte(nil), r...))
+	}
+
+	// Simulate pre-index state by dropping every index entry.
+	store := k.storeService.OpenKVStore(ctx)
+	for _, r := range roots {
+		require.NoError(t, store.Delete(types.RootIndexKey(r)))
+	}
+	valid, err := k.IsValidRootAnyTree(ctx, roots[len(roots)-1])
+	require.NoError(t, err)
+	require.False(t, valid, "precondition: index cleared")
+
+	require.NoError(t, k.RebuildRootIndex(ctx))
+
+	for i, r := range roots {
+		viaIndex, err := k.IsValidRootAnyTree(ctx, r)
+		require.NoError(t, err)
+		require.Equal(t, scanIsValidRootAnyTree(t, k, ctx, r), viaIndex,
+			"rebuilt index disagrees with scan on root %d", i)
+		require.True(t, viaIndex, "root %d should be valid after rebuild", i)
+	}
+
+	// Rebuilding again must converge, not accumulate.
+	before, err := k.rootRefCount(ctx, roots[len(roots)-1])
+	require.NoError(t, err)
+	require.NoError(t, k.RebuildRootIndex(ctx))
+	after, err := k.rootRefCount(ctx, roots[len(roots)-1])
+	require.NoError(t, err)
+	require.Equal(t, before, after, "RebuildRootIndex must be idempotent")
+}

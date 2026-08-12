@@ -28,6 +28,9 @@ var (
 	rootHistoryPrefix = []byte("nixpool/rh/")
 	// Per-tree current root: prefix + treeId(8)
 	treeRootPrefix = []byte("nixpool/tr/")
+
+	// rootIndexPrefix keys the root -> reference-count reverse index.
+	rootIndexPrefix = []byte("nixpool/ri/")
 	// Per-tree next index: prefix + treeId(8)
 	treeNextIndexPrefix = []byte("nixpool/ti/")
 	// Active tree ID
@@ -113,6 +116,23 @@ func RootHistoryKey(treeId uint64, slot uint64) []byte {
 // TreeRootKey returns the store key for the current root of a specific tree.
 func TreeRootKey(treeId uint64) []byte {
 	return appendUint64(treeRootPrefix, treeId)
+}
+
+// RootIndexKey keys the reverse index from a root to the number of live
+// references to it across the forest -- every TreeRootKey slot and every
+// RootHistoryKey slot currently holding that value.
+//
+// It exists so root validation is O(1) instead of a scan over
+// trees x MaxRootHistory. A reference count rather than a plain set is
+// required because one root legitimately occupies several slots at once: an
+// insert writes the new root to both the tree's current-root slot and a history
+// slot, and every freshly created tree starts at the same empty root.
+//
+// The canonicalisation is load-bearing for the same reason it is on
+// NullifierKey: a field element has multiple valid byte encodings, and a root
+// looked up under one encoding must hit the entry written under another.
+func RootIndexKey(root []byte) []byte {
+	return appendBytes(rootIndexPrefix, CanonicalFieldBytes(root))
 }
 
 // TreeNextIndexKey returns the store key for the next leaf index of a specific tree.

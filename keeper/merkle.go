@@ -108,9 +108,10 @@ func (k Keeper) CreateTree(ctx context.Context) (uint64, error) {
 		}
 	}
 
-	// Set initial root to zero root
+	// Set initial root to zero root. Indexed like any other root write: several
+	// empty trees share this value, which is exactly why the index refcounts.
 	emptyRoot := zeroRootBytes(depth)
-	if err := store.Set(types.TreeRootKey(treeId), emptyRoot); err != nil {
+	if err := k.setTreeRootIndexed(ctx, treeId, emptyRoot); err != nil {
 		return 0, err
 	}
 
@@ -260,14 +261,14 @@ func (k Keeper) insertLeafIntoTree(ctx context.Context, treeId uint64, commitmen
 	rootBytes := current.Bytes()
 	newRoot := rootBytes[:]
 
-	// Store new root
-	if err := store.Set(types.TreeRootKey(treeId), newRoot); err != nil {
+	// Store new root, and record it in the history ring buffer. Both go through
+	// the indexed setters so the reverse index tracks the roots they displace --
+	// in particular the ring buffer slot, whose overwrite is what expires an old
+	// root.
+	if err := k.setTreeRootIndexed(ctx, treeId, newRoot); err != nil {
 		return nil, 0, err
 	}
-
-	// Record root in history ring buffer
-	histKey := types.RootHistoryKey(treeId, index%types.MaxRootHistory)
-	if err := store.Set(histKey, newRoot); err != nil {
+	if err := k.setRootHistoryIndexed(ctx, treeId, index%types.MaxRootHistory, newRoot); err != nil {
 		return nil, 0, err
 	}
 
@@ -425,6 +426,174 @@ func (k Keeper) MarkNullifierSpent(ctx context.Context, nullifier []byte) error 
 	return store.Set(types.NullifierKey(nullifier), []byte{1})
 }
 
+// ---------- Root reverse index ----------
+//
+// The index maps a root to the number of slots currently holding it, across
+// every tree's current-root slot and every root-history slot. It is maintained
+// by the four places that write a root: CreateTree, insertLeafIntoTree (which
+// writes both a current root and a history slot), and genesis import.
+//
+// Reference counting is not incidental. One root value legitimately occupies
+// several slots at once -- an insert writes the same root to the tree's current
+// slot and to a history slot, and every freshly created tree starts at the
+// shared empty root -- so a plain set could not tell when the last live
+// reference disappeared.
+//
+// Getting the decrement right is the whole point. MaxRootHistory is a soundness
+// bound, not a cache size: it is what makes old roots expire, so a spend can
+// only prove against a recent tree state. An index that grew without evicting
+// would make every root ever observed valid forever, quietly turning bounded
+// lookback into unbounded.
+
+// rootRefCount returns the number of live slots holding root.
+func (k Keeper) rootRefCount(ctx context.Context, root []byte) (uint64, error) {
+	if len(root) == 0 {
+		return 0, nil
+	}
+	bz, err := k.storeService.OpenKVStore(ctx).Get(types.RootIndexKey(root))
+	if err != nil {
+		return 0, err
+	}
+	if bz == nil {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(bz), nil
+}
+
+// rootIndexIncr records one more slot holding root.
+func (k Keeper) rootIndexIncr(ctx context.Context, root []byte) error {
+	if len(root) == 0 {
+		return nil
+	}
+	n, err := k.rootRefCount(ctx, root)
+	if err != nil {
+		return err
+	}
+	bz := make([]byte, 8)
+	binary.BigEndian.PutUint64(bz, n+1)
+	return k.storeService.OpenKVStore(ctx).Set(types.RootIndexKey(root), bz)
+}
+
+// rootIndexDecr releases one slot's hold on root, deleting the entry when the
+// last reference goes. Callers pass the value being overwritten, which is empty
+// for a slot that was never written; that is not an error, just nothing to
+// release.
+func (k Keeper) rootIndexDecr(ctx context.Context, root []byte) error {
+	if len(root) == 0 {
+		return nil
+	}
+	n, err := k.rootRefCount(ctx, root)
+	if err != nil {
+		return err
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	if n <= 1 {
+		// Last reference (or an untracked value, e.g. state written before the
+		// index existed). Either way the root is no longer reachable.
+		return store.Delete(types.RootIndexKey(root))
+	}
+	bz := make([]byte, 8)
+	binary.BigEndian.PutUint64(bz, n-1)
+	return store.Set(types.RootIndexKey(root), bz)
+}
+
+// setTreeRootIndexed writes a tree's current root, keeping the index in step
+// with the value it displaces.
+func (k Keeper) setTreeRootIndexed(ctx context.Context, treeId uint64, newRoot []byte) error {
+	store := k.storeService.OpenKVStore(ctx)
+	old, err := store.Get(types.TreeRootKey(treeId))
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(old, newRoot) {
+		return nil // no net change; avoid decrementing to zero and back
+	}
+	if err := store.Set(types.TreeRootKey(treeId), newRoot); err != nil {
+		return err
+	}
+	if err := k.rootIndexIncr(ctx, newRoot); err != nil {
+		return err
+	}
+	return k.rootIndexDecr(ctx, old)
+}
+
+// setRootHistoryIndexed writes a root-history slot, releasing whatever root the
+// ring buffer is overwriting. This is the eviction path that makes old roots
+// expire.
+func (k Keeper) setRootHistoryIndexed(ctx context.Context, treeId, slot uint64, newRoot []byte) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.RootHistoryKey(treeId, slot)
+	old, err := store.Get(key)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(old, newRoot) {
+		return nil
+	}
+	if err := store.Set(key, newRoot); err != nil {
+		return err
+	}
+	if err := k.rootIndexIncr(ctx, newRoot); err != nil {
+		return err
+	}
+	return k.rootIndexDecr(ctx, old)
+}
+
+// RebuildRootIndex reconstructs the reverse index from the authoritative root
+// slots. Call it from an upgrade handler on a chain whose state predates the
+// index; without it IsValidRootAnyTree would reject every root the chain knows,
+// halting Transact until the index was populated.
+//
+// Genesis import does not need this -- InitGenesis writes through the indexed
+// setters -- so this is only for in-place upgrades.
+//
+// The walk is bounded by trees x (1 + MaxRootHistory), the same work the old
+// lookup did on a single miss. It is safe to run more than once: it clears each
+// root's entry before recounting, so it converges on the true count rather than
+// accumulating.
+func (k Keeper) RebuildRootIndex(ctx context.Context) error {
+	count, err := k.GetTreeCount(ctx)
+	if err != nil {
+		return err
+	}
+	store := k.storeService.OpenKVStore(ctx)
+
+	// Collect first, then write, so a root appearing in several slots is counted
+	// once per slot rather than being reset midway through its own tally.
+	counts := map[string]uint64{}
+	record := func(b []byte) {
+		if len(b) == 0 {
+			return
+		}
+		counts[string(types.CanonicalFieldBytes(b))]++
+	}
+
+	for treeId := uint64(0); treeId < count; treeId++ {
+		cur, err := store.Get(types.TreeRootKey(treeId))
+		if err != nil {
+			return err
+		}
+		record(cur)
+
+		for slot := uint64(0); slot < types.MaxRootHistory; slot++ {
+			h, err := store.Get(types.RootHistoryKey(treeId, slot))
+			if err != nil {
+				return err
+			}
+			record(h)
+		}
+	}
+
+	for canonical, n := range counts {
+		bz := make([]byte, 8)
+		binary.BigEndian.PutUint64(bz, n)
+		if err := store.Set(types.RootIndexKey([]byte(canonical)), bz); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ---------- Root validation (multi-tree) ----------
 
 // IsKnownRoot checks if the given root matches the current or any historical root
@@ -461,52 +630,40 @@ func (k Keeper) IsKnownRoot(ctx context.Context, treeId uint64, root []byte) (bo
 	return false, nil
 }
 
-// IsValidRootAnyTree checks if the given root is known across any tree in the forest.
+// IsValidRootAnyTree reports whether root is current or recent in any tree of
+// the forest.
 //
-// This is O(trees x MaxRootHistory) store reads when the root is not found, and
-// Transact calls it once per non-zero nullifier. The forest only grows -- spent
-// notes remain as nullified leaves -- so the cost per Transact rises with total
-// pool history and never falls. Measured at roughly 1,100 gas per root read,
-// the lookups alone reach ~28% of a 40M-gas block at ~50 trees, and at ~180
-// trees a single Transact exceeds the block limit, which would make the message
-// type unexecutable chain-wide. An attacker can drive that growth while paying
-// only fees: deposit once, then self-directed 2-in/2-out transacts, each adding
-// leaves while the principal stays pooled.
+// This is a single store read via the reverse index. It previously scanned
+// trees x MaxRootHistory slots, which Transact pays once per non-zero
+// nullifier. Because the forest only grows -- spent notes remain as nullified
+// leaves -- that cost rose with total pool history and never fell: at roughly
+// 1,100 gas per root read it reached ~28% of a 40M-gas block at ~50 trees, and
+// at ~180 trees a single Transact would have exceeded the block limit, making
+// the message type unexecutable chain-wide. An attacker could drive that growth
+// while risking nothing, depositing once and then issuing self-directed
+// 2-in/2-out transacts that add leaves while the principal stays pooled.
 //
-// The fix is a root -> treeId index, making this O(1). Before implementing it,
-// note that the easy half is the lookup and the hard half is eviction:
-//
-//	MaxRootHistory is not a cache bound, it is a soundness bound. It is what
-//	makes old roots EXPIRE, so a spend can only prove against a recent tree
-//	state. An index that never deletes would make every root ever observed
-//	valid forever, silently converting bounded lookback into unbounded and
-//	accepting arbitrarily stale roots. The index entry must be deleted when
-//	the ring buffer overwrites its slot.
-//
-// That is why this has not simply been optimised in place: the obvious version
-// of the optimisation is a security regression.
+// The index is maintained by setTreeRootIndexed and setRootHistoryIndexed; see
+// the note there on why eviction, not lookup, is the load-bearing half.
 func (k Keeper) IsValidRootAnyTree(ctx context.Context, root []byte) (bool, error) {
-	count, err := k.GetTreeCount(ctx)
+	// Preserved from the scanning implementation: the all-zero root of an empty
+	// tree is accepted unconditionally, including before any tree exists.
+	//
+	// This is broader than it needs to be -- a real (non-dummy) input can never
+	// legitimately prove against the empty tree, since that would require a
+	// Poseidon preimage of the zero leaf, and dummy inputs skip the root check
+	// entirely via the zero-nullifier path in Transact. It is retained here only
+	// to keep this change purely a performance fix; narrowing it is a separate
+	// decision about acceptance semantics.
+	if bytes.Equal(zeroRootBytes(types.DefaultTreeDepth), root) {
+		return true, nil
+	}
+
+	n, err := k.rootRefCount(ctx, root)
 	if err != nil {
 		return false, err
 	}
-
-	// Also accept empty root before any trees exist
-	if count == 0 {
-		emptyRoot := zeroRootBytes(types.DefaultTreeDepth)
-		return bytes.Equal(emptyRoot, root), nil
-	}
-
-	for treeId := uint64(0); treeId < count; treeId++ {
-		known, err := k.IsKnownRoot(ctx, treeId, root)
-		if err != nil {
-			return false, err
-		}
-		if known {
-			return true, nil
-		}
-	}
-	return false, nil
+	return n > 0, nil
 }
 
 // IsValidRegRoot checks if the given root matches the current registration tree root.

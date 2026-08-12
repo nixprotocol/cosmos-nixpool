@@ -49,16 +49,17 @@ func (k Keeper) InitGenesis(ctx context.Context, gs *types.GenesisState) error {
 			}
 		}
 
-		// Root
+		// Root and root history. Written through the indexed setters so the
+		// reverse index that IsValidRootAnyTree reads is populated on import --
+		// otherwise an imported chain would reject every root it actually knows.
 		if len(tree.MerkleRoot) > 0 {
-			if err := store.Set(types.TreeRootKey(treeId), tree.MerkleRoot); err != nil {
+			if err := k.setTreeRootIndexed(ctx, treeId, tree.MerkleRoot); err != nil {
 				return err
 			}
 		}
 
-		// Root history
 		for i, r := range tree.RootHistory {
-			if err := store.Set(types.RootHistoryKey(treeId, uint64(i)), r); err != nil {
+			if err := k.setRootHistoryIndexed(ctx, treeId, uint64(i), r); err != nil {
 				return err
 			}
 		}
